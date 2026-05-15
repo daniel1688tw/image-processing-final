@@ -1,0 +1,7 @@
+numpy>=1.24
+opencv-python>=4.8
+scipy>=1.10
+# 以下為語意分割（DeepLabV3）所需；若僅需全前景模式可省略：
+torch>=2.0
+torchvision>=0.15
+pillow>=10.0
