@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from scipy.spatial import cKDTree
+
 from .mapping import ColorMapper
 from .palette import Palette, PaletteExtractor
 from .segmentation import segment_foreground
@@ -21,6 +23,7 @@ class TransferConfig:
     lighting_alpha: float = 0.3        # §5.2 預設 0.3
     use_segmentation: bool = True       # 失敗或關閉時整張視為前景
     neighbor_k: int = 3                 # §4.3.2 鄰域大小
+    soft_k: int = 3                     # 軟指派：混合最近 k 個調色盤中心
 
 
 def _bgr_to_lab(image_bgr: np.ndarray) -> np.ndarray:
@@ -41,22 +44,42 @@ def _apply_region_mapping(
     mapping: np.ndarray,
     region_mask: np.ndarray,
     out_lab: np.ndarray,
+    soft_k: int = 1,
 ) -> None:
-    """對 region_mask 內的像素套用 §4.4 公式。out_lab 會被原地更新。"""
+    """對 region_mask 內的像素套用 §4.4 公式。out_lab 會被原地更新。
+
+    soft_k > 1 時改用軟指派：以距離倒數加權最近 soft_k 個調色盤中心的
+    映射結果，消除梯度區域（如天空）的色帶斷層。
+    """
     if src_palette.centers.shape[0] == 0 or mapping.shape[0] == 0:
         return
-    # 對應像素的調色盤索引
+
     labels = src_palette.labels[region_mask]      # (M,)
     valid = labels >= 0
     if not valid.any():
         return
-    pixel_lab = src_lab[region_mask][valid]        # (V, 3)
-    centers = src_palette.centers[labels[valid]]   # (V, 3) b_i
-    targets = mapping[labels[valid]]                # (V, 3) f(b_i)
-    # f(p_i) = f(b_i) + (pixel_lab - b_i)
-    new_lab = targets + (pixel_lab - centers)
 
-    # 寫回：region_mask 內 valid 的位置
+    pixel_lab = src_lab[region_mask][valid]        # (V, 3)
+
+    k = min(soft_k, src_palette.centers.shape[0])
+    if k <= 1:
+        # 原始硬指派路徑
+        centers = src_palette.centers[labels[valid]]   # (V, 3)
+        targets = mapping[labels[valid]]                # (V, 3)
+        new_lab = targets + (pixel_lab - centers)
+    else:
+        # 軟指派：對每個像素查詢最近 k 個調色盤中心，以距離倒數加權
+        tree = cKDTree(src_palette.centers)
+        dists, idxs = tree.query(pixel_lab, k=k)       # (V, k)
+        eps = 1e-6
+        inv = 1.0 / (dists + eps)                       # (V, k)
+        w = inv / inv.sum(axis=1, keepdims=True)        # (V, k)  歸一化
+
+        # 加權中心與加權映射目標
+        blended_centers = (w[..., None] * src_palette.centers[idxs]).sum(axis=1)  # (V, 3)
+        blended_targets = (w[..., None] * mapping[idxs]).sum(axis=1)              # (V, 3)
+        new_lab = blended_targets + (pixel_lab - blended_centers)
+
     region_indices = np.where(region_mask)
     rows = region_indices[0][valid]
     cols = region_indices[1][valid]
@@ -103,7 +126,7 @@ def transfer_color(
         if ref_pal.centers.shape[0] == 0:
             return
         mapping = mapper.build_mapping(src_pal, ref_pal)
-        _apply_region_mapping(src_lab, src_pal, mapping, src_mask, f_full_lab)
+        _apply_region_mapping(src_lab, src_pal, mapping, src_mask, f_full_lab, soft_k=cfg.soft_k)
 
     process_region(src_fg, ref_fg)
     src_bg = ~src_fg
