@@ -24,6 +24,11 @@ class TransferConfig:
     use_segmentation: bool = True       # 失敗或關閉時整張視為前景
     neighbor_k: int = 3                 # §4.3.2 鄰域大小
     soft_k: int = 3                     # 軟指派：混合最近 k 個調色盤中心
+    # Optimal-transport mapping (None = baseline nearest-neighbour)
+    ot_variant: str | None = None       # 'emd' | 'sinkhorn' | 'unbalanced'
+    ot_epsilon: float = 0.05            # Sinkhorn / unbalanced entropy reg
+    ot_tau: float = 0.1                 # unbalanced marginal KL penalty
+    ot_use_delta_e: bool = True         # use CIEDE2000 cost (needs colour-science)
 
 
 def _bgr_to_lab(image_bgr: np.ndarray) -> np.ndarray:
@@ -125,8 +130,18 @@ def transfer_color(
         ref_pal = extractor.extract(ref_lab, ref_eff_mask)
         if ref_pal.centers.shape[0] == 0:
             return
-        mapping = mapper.build_mapping(src_pal, ref_pal)
-        _apply_region_mapping(src_lab, src_pal, mapping, src_mask, f_full_lab, soft_k=cfg.soft_k)
+        if cfg.ot_variant is not None:
+            from .ot_mapping import build_ot_mapping
+            region_mapping = build_ot_mapping(
+                src_pal, ref_pal,
+                variant=cfg.ot_variant,
+                epsilon=cfg.ot_epsilon,
+                tau=cfg.ot_tau,
+                use_delta_e=cfg.ot_use_delta_e,
+            )
+        else:
+            region_mapping = mapper.build_mapping(src_pal, ref_pal)
+        _apply_region_mapping(src_lab, src_pal, region_mapping, src_mask, f_full_lab, soft_k=cfg.soft_k)
 
     process_region(src_fg, ref_fg)
     src_bg = ~src_fg

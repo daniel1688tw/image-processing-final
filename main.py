@@ -28,6 +28,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--alpha", type=float, default=0.3, help="L 通道映射權重")
     p.add_argument("--max-palette", type=int, default=32, help="調色盤峰值上限 t")
     p.add_argument("--bins", type=int, default=100, help="直方圖分箱數 z")
+    p.add_argument(
+        "--ot-variant",
+        choices=["emd", "sinkhorn", "unbalanced"],
+        default=None,
+        help="OT-based palette matching variant (default: baseline nearest-neighbour)",
+    )
+    p.add_argument("--ot-epsilon", type=float, default=0.05, help="Sinkhorn/unbalanced entropy reg ε")
+    p.add_argument("--ot-tau", type=float, default=0.1, help="Unbalanced OT marginal penalty τ")
     return p.parse_args()
 
 
@@ -45,6 +53,9 @@ def main() -> None:
         max_palette_size=args.max_palette,
         lighting_alpha=args.alpha,
         use_segmentation=not args.no_seg,
+        ot_variant=args.ot_variant,
+        ot_epsilon=args.ot_epsilon,
+        ot_tau=args.ot_tau,
     )
     result = transfer_color(src, ref, cfg)
 
