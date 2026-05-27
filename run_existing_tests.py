@@ -42,7 +42,10 @@ def run_existing_tests():
             "--src", str(src_path),
             "--ref", str(ref_path),
             "--out", str(out_path),
-            "--no-seg"
+            "--no-seg",
+            "--ot-variant", "unbalanced",
+            "--ot-epsilon", "0.05",
+            "--ot-tau", "0.1"
         ]
         
         try:

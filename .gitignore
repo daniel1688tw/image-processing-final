@@ -2,3 +2,6 @@ VOC2012_test/
 image_final/
 __pycache__/
 *.pyc
+JPEGImages/
+.pytest_cache/
+outputs/

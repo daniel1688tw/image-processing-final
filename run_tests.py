@@ -4,37 +4,43 @@ import subprocess
 from pathlib import Path
 
 def create_tests():
-    # 1. 取得 VOC2012 圖片列表
-    voc_dir = Path("VOC2012_test/JPEGImages")
-    if not voc_dir.exists():
-        print(f"錯誤：找不到資料夾 {voc_dir.absolute()}")
+    # 1. 取得 JPEGImages 圖片列表
+    img_dir = Path("JPEGImages")
+    if not img_dir.exists():
+        print(f"錯誤：找不到資料夾 {img_dir.absolute()}")
         return
 
-    # 取得前 10 張圖片
-    images = sorted(list(voc_dir.glob("*.jpg")))
-    if len(images) < 10:
-        print(f"警告：圖片數量不足，僅找到 {len(images)} 張。將儘量配對。")
-    
-    num_tests = 5
-    if len(images) < num_tests * 2:
-        num_tests = len(images) // 2
+    images = sorted(list(img_dir.glob("*.jpg")))
+    if len(images) < 2:
+        print(f"警告：圖片數量不足，僅找到 {len(images)} 張。")
+        return
 
-    print(f"準備執行 {num_tests} 組測試...")
+    pair_count = len(images) // 2
+    if len(images) % 2 == 1:
+        print(f"提示：圖片總數為奇數 ({len(images)} 張)，將忽略最後一張。")
 
-    for i in range(num_tests):
+    sources = images[:pair_count]
+    references = images[pair_count:pair_count * 2]
+
+    out_root = Path("outputs")
+    sources_dir = out_root / "sources"
+    results_dir = out_root / "results"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"準備執行 {pair_count} 組測試...")
+
+    for i in range(pair_count):
         test_num = i + 1
-        test_folder = Path(f"test_{test_num}")
-        test_folder.mkdir(exist_ok=True)
+        src_path = sources[i]
+        ref_path = references[i]
 
-        src_path = images[i * 2]
-        ref_path = images[i * 2 + 1]
+        base_name = f"pair_{test_num:03d}.jpg"
+        src_out = sources_dir / base_name
+        out_path = results_dir / base_name
 
-        # 複製並命名為來源與參考圖
-        shutil.copy(src_path, test_folder / "source.jpg")
-        shutil.copy(ref_path, test_folder / "reference.jpg")
-
-        # 準備輸出路徑
-        out_path = test_folder / "result.jpg"
+        # 複製並命名為來源圖
+        shutil.copy(src_path, src_out)
         
         print(f"--- 測試 {test_num} ---")
         print(f"來源: {src_path.name}")
@@ -51,7 +57,7 @@ def create_tests():
             "--no-seg"
         ]
         
-        try:
+        try: 
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 print(f"成功：結果已儲存至 {out_path}")
