@@ -7,7 +7,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from .mapping import ColorMapper
+from .mapping import RBFColorTransfer
+from .ot_mapping import build_ot_mapping
 from .palette import Palette, PaletteExtractor
 from .segmentation import segment_foreground
 
@@ -20,7 +21,13 @@ class TransferConfig:
     max_palette_size: int = 32
     lighting_alpha: float = 0.3        # §5.2 預設 0.3
     use_segmentation: bool = True       # 失敗或關閉時整張視為前景
-    neighbor_k: int = 3                 # §4.3.2 鄰域大小
+    rbf_sigma: float | None = None      # RBF 高斯核超參數 sigma
+    lut_grid_size: int = 33             # 3D LUT 網格大小
+    # Optimal-transport mapping
+    ot_variant: str = "emd"             # 'emd' | 'sinkhorn' | 'unbalanced'
+    ot_epsilon: float = 0.05            # Sinkhorn / unbalanced entropy reg
+    ot_tau: float = 0.1                 # unbalanced marginal KL penalty
+    ot_use_delta_e: bool = True         # use CIEDE2000 cost (needs colour-science)
 
 
 def _bgr_to_lab(image_bgr: np.ndarray) -> np.ndarray:
@@ -41,8 +48,10 @@ def _apply_region_mapping(
     mapping: np.ndarray,
     region_mask: np.ndarray,
     out_lab: np.ndarray,
+    sigma: float | None = None,
+    grid_size: int = 33,
 ) -> None:
-    """對 region_mask 內的像素套用 §4.4 公式。out_lab 會被原地更新。"""
+    """對 region_mask 內的像素套用 RBF-LUT 連續色彩對應。out_lab 會被原地更新。"""
     if src_palette.centers.shape[0] == 0 or mapping.shape[0] == 0:
         return
     # 對應像素的調色盤索引
@@ -51,10 +60,18 @@ def _apply_region_mapping(
     if not valid.any():
         return
     pixel_lab = src_lab[region_mask][valid]        # (V, 3)
-    centers = src_palette.centers[labels[valid]]   # (V, 3) b_i
-    targets = mapping[labels[valid]]                # (V, 3) f(b_i)
-    # f(p_i) = f(b_i) + (pixel_lab - b_i)
-    new_lab = targets + (pixel_lab - centers)
+
+    # --- 舊有的 Nearest Neighbor 離散映射邏輯 (已註解以利代碼完整性) ---
+    # centers = src_palette.centers[labels[valid]]   # (V, 3) b_i
+    # targets = mapping[labels[valid]]                # (V, 3) f(b_i)
+    # # f(p_i) = f(b_i) + (pixel_lab - b_i)
+    # new_lab = targets + (pixel_lab - centers)
+    # -------------------------------------------------------------
+
+    # --- 新有的 RBF-LUT 連續插值與色域保護映射 ---
+    rbf_transfer = RBFColorTransfer(src_palette.centers, mapping, sigma=sigma, grid_size=grid_size)
+    new_lab = rbf_transfer.map_colors(pixel_lab)
+    # ---------------------------------------------
 
     # 寫回：region_mask 內 valid 的位置
     region_indices = np.where(region_mask)
@@ -88,7 +105,7 @@ def transfer_color(
         peak_min_count=cfg.peak_min_count,
         max_palette_size=cfg.max_palette_size,
     )
-    mapper = ColorMapper(neighbor_k=cfg.neighbor_k)
+
 
     # 2) 為每個區域萃取調色盤；建立 f_full Lab 結果（先複製來源）
     f_full_lab = src_lab.copy()
@@ -102,8 +119,23 @@ def transfer_color(
         ref_pal = extractor.extract(ref_lab, ref_eff_mask)
         if ref_pal.centers.shape[0] == 0:
             return
-        mapping = mapper.build_mapping(src_pal, ref_pal)
-        _apply_region_mapping(src_lab, src_pal, mapping, src_mask, f_full_lab)
+        mapping = build_ot_mapping(
+            src_pal,
+            ref_pal,
+            variant=cfg.ot_variant,
+            epsilon=cfg.ot_epsilon,
+            tau=cfg.ot_tau,
+            use_delta_e=cfg.ot_use_delta_e
+        )
+        _apply_region_mapping(
+            src_lab,
+            src_pal,
+            mapping,
+            src_mask,
+            f_full_lab,
+            sigma=cfg.rbf_sigma,
+            grid_size=cfg.lut_grid_size,
+        )
 
     process_region(src_fg, ref_fg)
     src_bg = ~src_fg

@@ -1,6 +1,12 @@
 numpy>=1.24
 opencv-python>=4.8
 scipy>=1.10
+gradio>=4.0,<5.0
+huggingface_hub<1.0
+# Optimal Transport mapping (replaces nearest-neighbour step)
+POT>=0.9
+colour-science>=0.4   # CIEDE2000 cost; optional — falls back to Euclidean without it
+scikit-image>=0.21    # SSIM metric
 # 以下為語意分割（DeepLabV3）所需；若僅需全前景模式可省略：
 torch>=2.0
 torchvision>=0.15
